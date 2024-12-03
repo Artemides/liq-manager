@@ -7,8 +7,9 @@ import {ILiquidityMananger} from "./interfaces/LiquidityManager.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "./interfaces/ILBRouter.sol";
 import "./interfaces/ILBPair.sol";
+import "lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/UUPSUpgradeable.sol";
 
-contract LiquidityManager is AccessControl {
+contract LiquidityManager is UUPSUpgradeable, AccessControl {
     bytes32 public constant EXECUTOR_ROLE = keccak256("EXECUTOR_ROLE");
     bytes32 public constant OBSERVER_ROLE = keccak256("OBSERVER_ROLE");
     uint256 public constant PRESITION = 1e18;
@@ -39,7 +40,11 @@ contract LiquidityManager is AccessControl {
 
     error UnsupportedVersion();
 
-    constructor(address _tokenX, address _tokenY, address _router, address admin, address executor) {
+    function initialize(address _tokenX, address _tokenY, address _router, address admin, address executor)
+        public
+        initializer
+    {
+        __UUPSUpgradeable_init();
         tokenX = IERC20(_tokenX);
         tokenY = IERC20(_tokenY);
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
@@ -150,4 +155,6 @@ contract LiquidityManager is AccessControl {
         pairIndex[lastPair.pairAddress] = pairAt;
         delete pairIndex[pair];
     }
+
+    function _authorizeUpgrade(address) internal override onlyRole(DEFAULT_ADMIN_ROLE) {}
 }
