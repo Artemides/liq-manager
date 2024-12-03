@@ -20,18 +20,21 @@ contract LiquidityManager is AccessControl {
         V2_2
     }
 
+    struct PairDetails {
+        address pairAddress;
+        uint256[] ids;
+    }
+
     IERC20 tokenX;
     IERC20 tokenY;
     ILBRouter router;
 
+    PairDetails[] accountPairs;
+    mapping(address => uint256) private pairIndex;
+
     event LiquidityWithdraw(uint256 amount);
     event LiquidityReallocated(
-        uint256 amountXAdded,
-        uint256 amountYAdded,
-        uint256 amountXLeft,
-        uint256 amountYLeft,
-        uint256[] depositIds,
-        uint256[] liquidityMinted
+        uint256 amountXRemoved, uint256 amountYRemoved, uint256 amountXAdded, uint256 amountYAdded
     );
 
     error UnsupportedVersion();
@@ -42,9 +45,16 @@ contract LiquidityManager is AccessControl {
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
         _grantRole(EXECUTOR_ROLE, executor);
         router = ILBRouter(_router);
+
+        accountPairs.push(PairDetails(address(0), new uint256[](0)));
     }
 
-    function withdraw() external onlyRole(DEFAULT_ADMIN_ROLE) {}
+    function withdraw(uint16 fromBinStep, uint256[] calldata ids, uint256 deadline)
+        external
+        onlyRole(DEFAULT_ADMIN_ROLE)
+    {
+        _removeLiquidity(fromBinStep, ids, block.timestamp + deadline);
+    }
 
     function removeAndAddLiquidity(
         uint16 fromBinStep,
@@ -57,12 +67,44 @@ contract LiquidityManager is AccessControl {
         uint256[] calldata distributionY,
         uint256 deadline
     ) external onlyRole(EXECUTOR_ROLE) {
+        //deallocate liquidity from ids s
+        (uint256 amountXRemoved, uint256 amountYRemoved) = _removeLiquidity(fromBinStep, ids, deadline);
+        //allocate liquidty based on bot analysis  and available
+        ILBRouter.LiquidityParameters memory liqParams = ILBRouter.LiquidityParameters({
+            tokenX: tokenX,
+            tokenY: tokenY,
+            binStep: toBinStep,
+            amountX: amountXRemoved,
+            amountY: amountYRemoved,
+            amountXMin: _slippage(amountXRemoved, 1), // Allow 1% slippage
+            amountYMin: _slippage(amountYRemoved, 1), // Allow 1% slippage
+            activeIdDesired: activeIdDesired,
+            idSlippage: idSlippage,
+            deltaIds: deltaIds,
+            distributionX: distributionX,
+            distributionY: distributionY,
+            to: address(this),
+            refundTo: address(this),
+            deadline: block.timestamp + deadline
+        });
+
+        tokenX.approve(address(router), amountXRemoved);
+        tokenY.approve(address(router), amountYRemoved);
+
+        (uint256 amountXAdded, uint256 amountYAdded,,,,) = router.addLiquidity(liqParams);
+        emit LiquidityReallocated(amountXRemoved, amountYRemoved, amountXAdded, amountYAdded);
+    }
+
+    function _removeLiquidity(uint16 fromBinStep, uint256[] calldata ids, uint256 deadline)
+        internal
+        returns (uint256 amountXRemoved, uint256 amountYRemoved)
+    {
         ILBPair pair = ILBPair(_getPair(fromBinStep));
+
+        uint256[] memory amounts = new uint256[](ids.length);
         uint256 totalXBalanceWithdrawn;
         uint256 totalYBalanceWithdrawn;
-        uint256[] memory amounts = new uint256[](ids.length);
         // To figure out amountXMin and amountYMin, we calculate how much X and Y underlying we have as liquidity
-
         for (uint256 i; i < ids.length; i++) {
             uint256 LBTokenAmount = pair.balanceOf(address(this), ids[i]);
             amounts[i] = LBTokenAmount;
@@ -71,51 +113,41 @@ contract LiquidityManager is AccessControl {
             totalXBalanceWithdrawn += LBTokenAmount * binReserveX / pair.totalSupply(ids[i]);
             totalYBalanceWithdrawn += LBTokenAmount * binReserveY / pair.totalSupply(ids[i]);
         }
-        uint256 amountXMin = totalXBalanceWithdrawn * 99 / 100; // Allow 1% slippage
-        uint256 amountYMin = totalYBalanceWithdrawn * 99 / 100; // Allow 1% slippage
+        uint256 amountXMin = _slippage(totalXBalanceWithdrawn, 1); // Allow 1% slippage
+        uint256 amountYMin = _slippage(totalYBalanceWithdrawn, 1);
 
         pair.approveForAll(address(router), true);
 
-        (uint256 amountX, uint256 amountY) = router.removeLiquidity(
+        (amountXRemoved, amountYRemoved) = router.removeLiquidity(
             tokenX, tokenY, fromBinStep, amountXMin, amountYMin, ids, amounts, address(this), deadline
         );
+    }
 
-        amountXMin = amountX * 99 / 100; // Allow 1% slippage
-        amountYMin = amountY * 99 / 100; // Allow 1% slippage
-
-        ILBRouter.LiquidityParameters memory liqParams = ILBRouter.LiquidityParameters({
-            tokenX: tokenX,
-            tokenY: tokenY,
-            binStep: toBinStep,
-            amountX: amountX,
-            amountY: amountY,
-            amountXMin: amountXMin,
-            amountYMin: amountYMin,
-            activeIdDesired: activeIdDesired,
-            idSlippage: idSlippage,
-            deltaIds: deltaIds,
-            distributionX: distributionX,
-            distributionY: distributionY,
-            to: address(this),
-            refundTo: address(this),
-            deadline: deadline
-        });
-
-        tokenX.approve(address(router), amountX);
-        tokenY.approve(address(router), amountY);
-        (
-            uint256 amountXAdded,
-            uint256 amountYAdded,
-            uint256 amountXLeft,
-            uint256 amountYLeft,
-            uint256[] memory depositIds,
-            uint256[] memory liquidityMinted
-        ) = router.addLiquidity(liqParams);
-
-        emit LiquidityReallocated(amountXAdded, amountYAdded, amountXLeft, amountYLeft, depositIds, liquidityMinted);
+    function _slippage(uint256 amount, uint256 percentage) internal pure returns (uint256) {
+        return amount * (100 - percentage) / 100; // Allow 1% slippage
     }
 
     function _getPair(uint256 binStep) private view returns (address pair) {
         pair = address(router.getFactory().getLBPairInformation(tokenX, tokenY, binStep).LBPair);
+    }
+
+    function _addPair(uint256 binStep, uint256[] memory ids) internal {
+        address pair = _getPair(binStep);
+        if (pairIndex[pair] == 0) {
+            pairIndex[pair] = accountPairs.length;
+            accountPairs.push(PairDetails(pair, ids));
+        }
+    }
+
+    function _removePair(uint256 binStep) internal {
+        address pair = _getPair(binStep);
+        uint256 pairAt = pairIndex[pair];
+        require(pairAt != 0, "Pair does not exist");
+
+        PairDetails memory lastPair = accountPairs[accountPairs.length - 1];
+        accountPairs[pairAt] = lastPair;
+        accountPairs.pop();
+        pairIndex[lastPair.pairAddress] = pairAt;
+        delete pairIndex[pair];
     }
 }
