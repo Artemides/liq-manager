@@ -114,3 +114,9 @@ $ forge build
 ```shell
 $ forge test --fork-url $AVALANCHE_MAINNET_RPC --match-contract TestLiquidityManager
 ```
+
+### Deploy
+
+```shell
+$ forge script deploy/LiquidityManagerDeploy.s.sol --rpc-url $AVALANCHE_MAINNET_RPC --broadcast
+```
