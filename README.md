@@ -38,7 +38,7 @@ The bot needs to understand `ILiquidityManager` interface in order to achieve ch
 
 ### Initialization
 
-#### `initialize(address _tokenX, address _tokenY, address _router, address _admin, address _executor)`
+- `initialize(address _tokenX, address _tokenY, address _router, address _admin, address _executor)`
 
 Initializes the contract with the required parameters. This function is called only once during the deployment or upgrade of the contract.
 
