@@ -36,11 +36,10 @@ contract LiquidityManager is UUPSUpgradeable, AccessControl, ILiquidityManager {
     mapping(address => uint256[]) public pairIds;
     mapping(address => mapping(uint256 => uint256)) public pairIdIndex;
 
-    event LiquidityRemoved(uint256 amount);
     event LiquidityReallocated(
         uint256 amountXRemoved, uint256 amountYRemoved, uint256 amountXAdded, uint256 amountYAdded
     );
-
+    event Withdraw(uint256 amountX, uint256 amountY);
     /**
      * @notice Initializes the Proxy contract with the specified parameters.
      *
@@ -56,6 +55,7 @@ contract LiquidityManager is UUPSUpgradeable, AccessControl, ILiquidityManager {
      * @param _admin The address of the account to be granted the `DEFAULT_ADMIN_ROLE` and `ADMIN_ROLE`.
      * @param _executor The address of the bot or account to be granted the `EXECUTOR_ROLE` .
      */
+
     function initialize(address _tokenX, address _tokenY, address _router, address _admin, address _executor)
         public
         initializer
@@ -94,6 +94,7 @@ contract LiquidityManager is UUPSUpgradeable, AccessControl, ILiquidityManager {
 
         tokenX.transfer(admin, totalXRemoved);
         tokenY.transfer(admin, totalYRemoved);
+        emit Withdraw(totalXRemoved, totalYRemoved);
     }
 
     /**
