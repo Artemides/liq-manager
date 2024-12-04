@@ -11,7 +11,8 @@ import "lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/UUPSUpgrade
 
 contract LiquidityManager is UUPSUpgradeable, AccessControl {
     bytes32 public constant EXECUTOR_ROLE = keccak256("EXECUTOR_ROLE");
-    bytes32 public constant OBSERVER_ROLE = keccak256("OBSERVER_ROLE");
+    bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
+
     uint256 public constant PRESITION = 1e18;
 
     enum Version {
@@ -24,6 +25,18 @@ contract LiquidityManager is UUPSUpgradeable, AccessControl {
     struct PairDetails {
         address pairAddress;
         uint256[] ids;
+    }
+
+    struct RemoveAndAddLiquidityParams {
+        uint16 fromBinStep;
+        uint16 toBinStep;
+        uint256[] ids;
+        uint24 activeIdDesired;
+        uint256 idSlippage;
+        int256[] deltaIds;
+        uint256[] distributionX;
+        uint256[] distributionY;
+        uint256 deadline;
     }
 
     IERC20 tokenX;
@@ -47,7 +60,11 @@ contract LiquidityManager is UUPSUpgradeable, AccessControl {
         __UUPSUpgradeable_init();
         tokenX = IERC20(_tokenX);
         tokenY = IERC20(_tokenY);
+        _setRoleAdmin(ADMIN_ROLE, DEFAULT_ADMIN_ROLE);
+        _setRoleAdmin(EXECUTOR_ROLE, ADMIN_ROLE);
+
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
+        _grantRole(ADMIN_ROLE, admin);
         _grantRole(EXECUTOR_ROLE, executor);
         router = ILBRouter(_router);
 
@@ -61,36 +78,27 @@ contract LiquidityManager is UUPSUpgradeable, AccessControl {
         _removeLiquidity(fromBinStep, ids, block.timestamp + deadline);
     }
 
-    function removeAndAddLiquidity(
-        uint16 fromBinStep,
-        uint16 toBinStep,
-        uint256[] calldata ids,
-        uint24 activeIdDesired,
-        uint256 idSlippage,
-        int256[] calldata deltaIds,
-        uint256[] calldata distributionX,
-        uint256[] calldata distributionY,
-        uint256 deadline
-    ) external onlyRole(EXECUTOR_ROLE) {
+    function removeAndAddLiquidity(RemoveAndAddLiquidityParams memory params) external onlyRole(EXECUTOR_ROLE) {
         //deallocate liquidity from ids s
-        (uint256 amountXRemoved, uint256 amountYRemoved) = _removeLiquidity(fromBinStep, ids, deadline);
+        (uint256 amountXRemoved, uint256 amountYRemoved) =
+            _removeLiquidity(params.fromBinStep, params.ids, params.deadline);
         //allocate liquidty based on bot analysis  and available
         ILBRouter.LiquidityParameters memory liqParams = ILBRouter.LiquidityParameters({
             tokenX: tokenX,
             tokenY: tokenY,
-            binStep: toBinStep,
+            binStep: params.toBinStep,
             amountX: amountXRemoved,
             amountY: amountYRemoved,
             amountXMin: _slippage(amountXRemoved, 1), // Allow 1% slippage
             amountYMin: _slippage(amountYRemoved, 1), // Allow 1% slippage
-            activeIdDesired: activeIdDesired,
-            idSlippage: idSlippage,
-            deltaIds: deltaIds,
-            distributionX: distributionX,
-            distributionY: distributionY,
+            activeIdDesired: params.activeIdDesired,
+            idSlippage: params.idSlippage,
+            deltaIds: params.deltaIds,
+            distributionX: params.distributionX,
+            distributionY: params.distributionY,
             to: address(this),
             refundTo: address(this),
-            deadline: block.timestamp + deadline
+            deadline: block.timestamp + params.deadline
         });
 
         tokenX.approve(address(router), amountXRemoved);
@@ -100,31 +108,31 @@ contract LiquidityManager is UUPSUpgradeable, AccessControl {
         emit LiquidityReallocated(amountXRemoved, amountYRemoved, amountXAdded, amountYAdded);
     }
 
-    function _removeLiquidity(uint16 fromBinStep, uint256[] calldata ids, uint256 deadline)
+    function _removeLiquidity(uint16 fromBinStep, uint256[] memory ids, uint256 deadline)
         internal
         returns (uint256 amountXRemoved, uint256 amountYRemoved)
     {
-        ILBPair pair = ILBPair(_getPair(fromBinStep));
+        ILBPair pair = ILBPair(getPair(fromBinStep));
 
         uint256[] memory amounts = new uint256[](ids.length);
-        uint256 totalXBalanceWithdrawn;
-        uint256 totalYBalanceWithdrawn;
+        uint256 amountXMin;
+        uint256 amountYMin;
         // To figure out amountXMin and amountYMin, we calculate how much X and Y underlying we have as liquidity
         for (uint256 i; i < ids.length; i++) {
             uint256 LBTokenAmount = pair.balanceOf(address(this), ids[i]);
             amounts[i] = LBTokenAmount;
             (uint256 binReserveX, uint256 binReserveY) = pair.getBin(uint24(ids[i]));
 
-            totalXBalanceWithdrawn += LBTokenAmount * binReserveX / pair.totalSupply(ids[i]);
-            totalYBalanceWithdrawn += LBTokenAmount * binReserveY / pair.totalSupply(ids[i]);
+            amountXMin += LBTokenAmount * binReserveX / pair.totalSupply(ids[i]);
+            amountYMin += LBTokenAmount * binReserveY / pair.totalSupply(ids[i]);
         }
-        uint256 amountXMin = _slippage(totalXBalanceWithdrawn, 1); // Allow 1% slippage
-        uint256 amountYMin = _slippage(totalYBalanceWithdrawn, 1);
+        amountXMin = _slippage(amountXMin, 1); // Allow 1% slippage
+        amountYMin = _slippage(amountYMin, 1);
 
         pair.approveForAll(address(router), true);
 
         (amountXRemoved, amountYRemoved) = router.removeLiquidity(
-            tokenX, tokenY, fromBinStep, amountXMin, amountYMin, ids, amounts, address(this), deadline
+            tokenX, tokenY, fromBinStep, amountXMin, amountYMin, ids, amounts, address(this), block.timestamp + deadline
         );
     }
 
@@ -132,12 +140,12 @@ contract LiquidityManager is UUPSUpgradeable, AccessControl {
         return amount * (100 - percentage) / 100; // Allow 1% slippage
     }
 
-    function _getPair(uint256 binStep) private view returns (address pair) {
+    function getPair(uint256 binStep) public view returns (address pair) {
         pair = address(router.getFactory().getLBPairInformation(tokenX, tokenY, binStep).LBPair);
     }
 
     function _addPair(uint256 binStep, uint256[] memory ids) internal {
-        address pair = _getPair(binStep);
+        address pair = getPair(binStep);
         if (pairIndex[pair] == 0) {
             pairIndex[pair] = accountPairs.length;
             accountPairs.push(PairDetails(pair, ids));
@@ -145,7 +153,7 @@ contract LiquidityManager is UUPSUpgradeable, AccessControl {
     }
 
     function _removePair(uint256 binStep) internal {
-        address pair = _getPair(binStep);
+        address pair = getPair(binStep);
         uint256 pairAt = pairIndex[pair];
         require(pairAt != 0, "Pair does not exist");
 
@@ -156,5 +164,5 @@ contract LiquidityManager is UUPSUpgradeable, AccessControl {
         delete pairIndex[pair];
     }
 
-    function _authorizeUpgrade(address) internal override onlyRole(DEFAULT_ADMIN_ROLE) {}
+    function _authorizeUpgrade(address) internal override onlyRole(EXECUTOR_ROLE) {}
 }
