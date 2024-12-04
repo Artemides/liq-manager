@@ -3,56 +3,54 @@
 pragma solidity 0.8.27;
 
 import "openzeppelin-contracts/contracts/access/AccessControl.sol";
-import {ILiquidityMananger} from "./interfaces/LiquidityManager.sol";
+import "./interfaces/ILiquidityManager.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "./interfaces/ILBRouter.sol";
 import "./interfaces/ILBPair.sol";
 import "lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/UUPSUpgradeable.sol";
 
-contract LiquidityManager is UUPSUpgradeable, AccessControl {
-    bytes32 public constant EXECUTOR_ROLE = keccak256("EXECUTOR_ROLE");
-    bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
-
-    uint256 public constant PRESITION = 1e18;
-
-    enum Version {
-        V1,
-        V2,
-        V2_1,
-        V2_2
-    }
-
+contract LiquidityManager is UUPSUpgradeable, AccessControl, ILiquidityManager {
     struct PairDetails {
         address pairAddress;
         uint256[] ids;
     }
 
-    struct RemoveAndAddLiquidityParams {
-        uint16 fromBinStep;
-        uint16 toBinStep;
-        uint256[] ids;
-        uint24 activeIdDesired;
-        uint256 idSlippage;
-        int256[] deltaIds;
-        uint256[] distributionX;
-        uint256[] distributionY;
-        uint256 deadline;
-    }
+    // roles used by Access Controll to manage admin and excutor
+    // the admin can also upgrate to new implementations
+    bytes32 public constant EXECUTOR_ROLE = keccak256("EXECUTOR_ROLE");
+    bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
+    uint256 public constant PRESITION = 1e18;
 
+    //Pair Addreses such USDT/USDX
     IERC20 tokenX;
     IERC20 tokenY;
     ILBRouter router;
 
+    // tracks the pairs where the contract deposited liquidity into
     PairDetails[] accountPairs;
+    // indexes of pairs in the accountPairs
     mapping(address => uint256) private pairIndex;
 
-    event LiquidityWithdraw(uint256 amount);
+    event LiquidityRemoved(uint256 amount);
     event LiquidityReallocated(
         uint256 amountXRemoved, uint256 amountYRemoved, uint256 amountXAdded, uint256 amountYAdded
     );
 
-    error UnsupportedVersion();
-
+    /**
+     * @notice Initializes the Proxy contract with the specified parameters.
+     *
+     * This function sets up initial values for token addresses, the router, roles, and grants them to the provided accounts.
+     * Additionally, it sets the router and initializes the account pairs.
+     *
+     * The function is called only once when the contract is deployed or upgraded, and the contract is initialized with specific addresses
+     * and roles that control the contract's functionality.
+     *
+     * @param _tokenX The address of the token X contract required for the LBPair.
+     * @param _tokenY The address of the token Y contrac required for the LBPair.
+     * @param _router The address of the router of Joe's AMM.
+     * @param admin The address of the account to be granted the `DEFAULT_ADMIN_ROLE` and `ADMIN_ROLE`.
+     * @param executor The address of the bot or account to be granted the `EXECUTOR_ROLE` .
+     */
     function initialize(address _tokenX, address _tokenY, address _router, address admin, address executor)
         public
         initializer
@@ -60,17 +58,26 @@ contract LiquidityManager is UUPSUpgradeable, AccessControl {
         __UUPSUpgradeable_init();
         tokenX = IERC20(_tokenX);
         tokenY = IERC20(_tokenY);
+
+        //grant Roles
         _setRoleAdmin(ADMIN_ROLE, DEFAULT_ADMIN_ROLE);
         _setRoleAdmin(EXECUTOR_ROLE, ADMIN_ROLE);
-
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
         _grantRole(ADMIN_ROLE, admin);
         _grantRole(EXECUTOR_ROLE, executor);
         router = ILBRouter(_router);
 
+        //tracking protection
         accountPairs.push(PairDetails(address(0), new uint256[](0)));
     }
 
+    /**
+     * @notice withdraws based on bot strategy
+     * @param fromBinStep the prince range to withdraw from
+     * @param ids the id positionsin the LBPair to withdraw from
+     * @param deadline the deadline of the Tx
+     * @dev in case of removing all the pairs and positions an uprade is required with probably tracking pairs and positions when the contract add or removes liquidity.
+     */
     function withdraw(uint16 fromBinStep, uint256[] calldata ids, uint256 deadline)
         external
         onlyRole(DEFAULT_ADMIN_ROLE)
@@ -78,6 +85,10 @@ contract LiquidityManager is UUPSUpgradeable, AccessControl {
         _removeLiquidity(fromBinStep, ids, block.timestamp + deadline);
     }
 
+    /**
+     * @notice Removes and re-adds liquidinty from Pairs and ids, to reallocate based on bot's strategy
+     * @param params RemoveAndAddLiquidityParams for reallocations
+     */
     function removeAndAddLiquidity(RemoveAndAddLiquidityParams memory params) external onlyRole(EXECUTOR_ROLE) {
         //deallocate liquidity from ids s
         (uint256 amountXRemoved, uint256 amountYRemoved) =
@@ -107,6 +118,12 @@ contract LiquidityManager is UUPSUpgradeable, AccessControl {
         (uint256 amountXAdded, uint256 amountYAdded,,,,) = router.addLiquidity(liqParams);
         emit LiquidityReallocated(amountXRemoved, amountYRemoved, amountXAdded, amountYAdded);
     }
+    /**
+     * @notice Removes liquidity
+     * @param fromBinStep binStep to remove liquidity from
+     * @param ids positions ids in the LBPair's binStep
+     * @param deadline deadline of the transaction
+     */
 
     function _removeLiquidity(uint16 fromBinStep, uint256[] memory ids, uint256 deadline)
         internal
@@ -136,14 +153,31 @@ contract LiquidityManager is UUPSUpgradeable, AccessControl {
         );
     }
 
+    /**
+     * @notice computes a sliapge
+     * @param amount amount used to get percentage slippage
+     * @param percentage the slippage percentage to apply
+     */
     function _slippage(uint256 amount, uint256 percentage) internal pure returns (uint256) {
+        if (percentage > 100) {
+            percentage = 100;
+        }
         return amount * (100 - percentage) / 100; // Allow 1% slippage
     }
 
+    /**
+     * @notice calculates the Pair for the tokenX and tokenY
+     * @param binStep the range to get the Pair
+     */
     function getPair(uint256 binStep) public view returns (address pair) {
         pair = address(router.getFactory().getLBPairInformation(tokenX, tokenY, binStep).LBPair);
     }
 
+    /**
+     * @notice tracks all the Pairs and positions the contract is currently holding
+     * @param binStep the range
+     * @param ids the positions ids in the range to track
+     */
     function _addPair(uint256 binStep, uint256[] memory ids) internal {
         address pair = getPair(binStep);
         if (pairIndex[pair] == 0) {
@@ -152,6 +186,10 @@ contract LiquidityManager is UUPSUpgradeable, AccessControl {
         }
     }
 
+    /**
+     * @notice removes from tracking the Pair and positions where the contract no more liquidity is available
+     * @param binStep range whete the user holds liquidity
+     */
     function _removePair(uint256 binStep) internal {
         address pair = getPair(binStep);
         uint256 pairAt = pairIndex[pair];
@@ -164,5 +202,8 @@ contract LiquidityManager is UUPSUpgradeable, AccessControl {
         delete pairIndex[pair];
     }
 
+    /**
+     * @notice override proxy admin grants
+     */
     function _authorizeUpgrade(address) internal override onlyRole(ADMIN_ROLE) {}
 }
