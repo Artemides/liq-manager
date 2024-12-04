@@ -5,6 +5,7 @@ This contract manages liquidity in Joe's Automated Market Maker (AMM), with the 
 ## Table of Contents
 
 - [Overview](#overview)
+- [Bot Integration](#bot-integration)
 - [Contract Functions](#contract-functions)
   - [Initialization](#initialization)
   - [Liquidity Management](#liquidity-management)
@@ -24,6 +25,15 @@ The `LiquidityManager` contract is built with the following key features:
 - Uses `UUPSUpgradeable` for proxy-based upgrades.
 - Implements `AccessControl` to manage roles for different users.
 
+## Bot Integration
+
+The bot needs to understand `ILiquidityManager` interface in order to achieve challenged tasks.
+
+- The Bot is supposed to find and compute its best strategies off-chain based on marked conditions
+- The Required params in the interface were defined as is, because Joe's AMM already emits events that can be analyzed cheaply off-chain, whilst it is possible to do it on-chain it's not recommended.
+- There's an attempt in the `LiquidityManager` to track on-chain liquidity. By tracking `BinStep Pairs` and even `ids` where liquidity can be deposited. However, having time limitation it couln't be solved at all, since Joe's already provides a `SDK` to track pool balances it's recommended the Bot analyzes and comunicates as `ILiquidityManager` says.
+- `LiquidityManager` might still require optimizations.
+
 ## Contract Functions
 
 ### Initialization
@@ -32,69 +42,29 @@ The `LiquidityManager` contract is built with the following key features:
 
 Initializes the contract with the required parameters. This function is called only once during the deployment or upgrade of the contract.
 
-**Parameters:**
-
-- `_tokenX`: Address of the first token (ERC20) USDT.
-- `_tokenY`: Address of the second token (ERC20) USDC.
-- `_router`: Address of the AMM's router.
-- `_admin`: Address of the admin (granted `ADMIN_ROLE`).
-- `_executor`: Address of the executor (granted `EXECUTOR_ROLE`).
-
 ### Liquidity Management
 
 #### `withdraw(uint16[] memory binSteps, uint256[][] calldata ids, uint256 deadline)`
 
 Removes all liquidity from specified price ranges and positions and transfers the liquidity to the admin's address.
 
-**Parameters:**
-
-- `binSteps`: Array of price ranges from which liquidity should be withdrawn.
-- `ids`: Array of position IDs within the LBPair to withdraw liquidity from.
-- `deadline`: Transaction deadline.
-
 #### `withdrawFromPair(uint16 fromBinStep, uint256[] calldata ids, uint256 deadline)`
 
 Removes liquidity from a specific price range and position and transfers it to the admin's address.
-
-**Parameters:**
-
-- `fromBinStep`: Price range to withdraw liquidity from.
-- `ids`: Array of position IDs within the LBPair to withdraw liquidity from.
-- `deadline`: Transaction deadline.
 
 #### `depositAllLiquidity(...)`
 
 Deposits liquidity into a specific price range and position as per the executor's strategy.
 
-**Parameters:**
-
-- `binStep`: Price range to deposit liquidity into.
-- `activeIdDesired`: Desired active ID for liquidity.
-- `idSlippage`: Slippage tolerance for the ID.
-- `deltaIds`: Array of delta IDs for liquidity distribution.
-- `distributionX`: Distribution for tokenX.
-- `distributionY`: Distribution for tokenY.
-- `deadline`: Transaction deadline.
-
 #### `removeAndAddLiquidity(RemoveAndAddLiquidityParams memory params)`
 
 Removes liquidity from one range and adds it to another based on a bot's strategy.
-
-**Parameters:**
-
-- `params`: Parameters for the liquidity removal and addition process.
 
 ### Tracking and Reallocation
 
 #### `_trackPair(uint256 binStep, uint256[] memory ids, bool add)`
 
 Tracks the liquidity positions for a specific pair. This is used to keep track of added or removed liquidity in the contract.
-
-**Parameters:**
-
-- `binStep`: Price range for the pair.
-- `ids`: Array of position IDs to track.
-- `add`: Whether to add or remove the tracking of liquidity.
 
 ## Access Control
 
