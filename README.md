@@ -95,6 +95,10 @@ The contract calculates slippage as a percentage of the liquidity removed or add
 - **Tracking**: All liquidity positions are tracked on-chain, but this may increase gas costs.
 - **Not yet Audited**: Do not use in production mode because the protocol still requires audit and optimizations
 
+## Knonw Issues
+
+- Under testings, the `test_removeAndAddLiquidity` might sometimes error with `LBRouter__PairNotCreated` possible due to the right chossing for the bins in LBPairs to reallocate. I requires a correct input based on Joe's AMM state.
+
 ## Getting Started
 
 ### installation
