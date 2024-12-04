@@ -5,4 +5,9 @@ libs = ["lib"]
 optimize = true
 runs = 200
 viaIR = true
+
+fuzz = true
+fuzz_runs = 1000
+fuzz_iterations = 1000
+fuzz_timeout = 30
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options

@@ -28,11 +28,20 @@ contract TestLiquidityManager is Test {
     error UUPSUnauthorizedCallContext();
 
     function setUp() public {
-        console.log("setyp");
-        manager = new LiquidityManager();
         deal(address(USDC), ADMIN, 1000e18);
         deal(address(USDT), ADMIN, 1000e18);
-        manager.initialize(address(USDT), address(USDC), address(router), ADMIN, EXECUTOR);
+        LiquidityManager implementation = new LiquidityManager();
+
+        // Deploy minimal proxy pointing to the implementation
+        bytes memory initData = abi.encodeWithSelector(
+            implementation.initialize.selector, address(USDT), address(USDC), address(router), ADMIN, EXECUTOR
+        );
+
+        // Create proxy
+        address proxyAddress = address(new LiquidityManagerProxy(address(implementation), initData));
+
+        // Interact with the proxy as the implementation contract
+        manager = LiquidityManager(proxyAddress);
     }
 
     function test_removeAndAddLiquidity() public {
@@ -78,9 +87,10 @@ contract TestLiquidityManager is Test {
         manager.removeAndAddLiquidity(params);
     }
 
-    function test_onlyAdminCanWithdraw() public {
-        vm.prank(address(100));
-        vm.expectRevert(abi.encodeWithSelector(AccessControlUnauthorizedAccount.selector, address(100), 0x0));
+    function testFuzz_onlyAdminCanWithdraw(address caller) public {
+        vm.assume(caller != ADMIN);
+        vm.prank(caller);
+        vm.expectRevert();
 
         manager.withdraw(1, new uint256[](1), block.timestamp);
     }
@@ -88,24 +98,13 @@ contract TestLiquidityManager is Test {
     function test_onlyAdminCanUpgrade() public {
         LiquidityManager implementation = new LiquidityManager();
 
-        // Deploy minimal proxy pointing to the implementation
-        bytes memory initData =
-            abi.encodeWithSelector(implementation.initialize.selector, USDT, USDC, router, ADMIN, EXECUTOR);
-
-        // Create proxy
-        address proxyAddress = address(new LiquidityManagerProxy(address(implementation), initData));
-
-        // Interact with the proxy as the implementation contract
-        LiquidityManager proxiedManager = LiquidityManager(proxyAddress);
-
         // Test non-admin caller
-        // vm.prank(address(100));
-        // vm.expectRevert(UUPSUnauthorizedCallContext.selector);
-        // proxiedManager.upgradeToAndCall(address(1), "");
+        vm.prank(address(100));
+        vm.expectRevert();
+        manager.upgradeToAndCall(address(1), "");
 
-        // Test admin caller
         vm.prank(ADMIN);
-        proxiedManager.upgradeToAndCall(address(new LiquidityManager()), "");
+        manager.upgradeToAndCall(address(implementation), "");
     }
 
     function _prefundLiquidityManager()
