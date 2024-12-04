@@ -164,5 +164,5 @@ contract LiquidityManager is UUPSUpgradeable, AccessControl {
         delete pairIndex[pair];
     }
 
-    function _authorizeUpgrade(address) internal override onlyRole(EXECUTOR_ROLE) {}
+    function _authorizeUpgrade(address) internal override onlyRole(ADMIN_ROLE) {}
 }
