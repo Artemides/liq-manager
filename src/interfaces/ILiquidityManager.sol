@@ -32,9 +32,17 @@ interface ILiquidityManager {
     /**
      * @notice Withdraw all liquidity to the Admin's wallet.
      * @dev No params required so that withdraw all the Pool Balance
+     * @param binSteps the ranges in a pair to withdraw from
+     * @param ids the ids in the ranges pairs to withdraw from
      */
-    function withdraw(uint16 fromBinStep, uint256[] calldata ids, uint256 deadline) external;
+    function withdraw(uint16[] memory binSteps, uint256[][] memory ids, uint256 deadline) external;
 
+    /**
+     * @notice Withdraw all liquidity to the Admin's wallet.
+     * @param binStep range in a Pair to Withdraw from
+     * @param ids in the range Pair to withdraw from
+     */
+    function withdrawFromPair(uint16 binStep, uint256[] calldata ids, uint256 deadline) external;
     /**
      * @notice only the bot can call it so that reallocate liquidity based on it's off-chain computed strategy
      * @param params the RemoveAndAddLiquidityParams
