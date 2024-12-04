@@ -30,12 +30,26 @@ interface ILiquidityManager {
     }
 
     /**
+     * @notice Removes liquidity
+     * @param fromBinStep binStep to remove liquidity from
+     * @param ids positions ids in the LBPair's binStep
+     * @param deadline deadline of the transaction
+     */
+    struct RemoveLiquidityParams {
+        uint16 fromBinStep;
+        uint256[] ids;
+        uint256 deadline;
+    }
+
+    /**
      * @notice Withdraw all liquidity to the Admin's wallet.
      * @dev No params required so that withdraw all the Pool Balance
      * @param binSteps the ranges in a pair to withdraw from
      * @param ids the ids in the ranges pairs to withdraw from
      */
-    function withdraw(uint16[] memory binSteps, uint256[][] memory ids, uint256 deadline) external;
+    function withdraw(uint16[] memory binSteps, uint256[][] memory ids, uint256 deadline)
+        external
+        returns (uint256 totalXRemoved, uint256 totalYRemoved);
 
     /**
      * @notice Withdraw all liquidity to the Admin's wallet.

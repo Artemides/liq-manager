@@ -10,6 +10,8 @@ import "../src/interfaces/ILBFactory.sol";
 import "../src/interfaces/ILBRouter.sol";
 import "../src/interfaces/ILBPair.sol";
 import "./../src/LiquidityManager.sol";
+import "./../src/interfaces/ILiquidityManager.sol";
+
 import {LiquidityManagerProxy} from "./mocks/LiquidityManagerProxy.sol";
 
 contract TestLiquidityManager is Test {
@@ -44,9 +46,45 @@ contract TestLiquidityManager is Test {
         manager = LiquidityManager(proxyAddress);
     }
 
+    function test_withdraw() public {
+        uint256[] memory binSteps = factory.getAllBinSteps();
+        uint16 binStep = uint16(binSteps[0]);
+        (,,,, uint256[] memory depositIds,) = _prefundLiquidityManager();
+
+        uint16[] memory fromBinSteps = new uint16[](1);
+        fromBinSteps[0] = binStep;
+
+        uint256[][] memory ids = new uint256[][](1);
+        ids[0] = new uint256[](1);
+        ids[0] = depositIds;
+
+        uint256 startingAdminXBalance = USDT.balanceOf(ADMIN);
+        uint256 startingAdminYBalance = USDC.balanceOf(ADMIN);
+
+        vm.prank(ADMIN);
+        (uint256 amountXWithdrawn, uint256 amountYWithdrawn) =
+            manager.withdraw(fromBinSteps, ids, block.timestamp + 300);
+        uint256 endingAdminXBalance = USDT.balanceOf(ADMIN);
+        uint256 endingAdminYBalance = USDC.balanceOf(ADMIN);
+
+        assertEq(endingAdminXBalance, startingAdminXBalance + amountXWithdrawn);
+        assertEq(endingAdminYBalance, startingAdminYBalance + amountYWithdrawn);
+    }
+
     function test_removeAndAddLiquidity() public {
         uint256[] memory binSteps = factory.getAllBinSteps();
         (,,,, uint256[] memory depositIds,) = _prefundLiquidityManager();
+
+        //REMOVE LIQUIDITY FROM
+        uint16[] memory fromBinSteps = new uint16[](1);
+        uint16 binStep = uint16(binSteps[0]);
+        fromBinSteps[0] = binStep;
+
+        uint256[][] memory ids = new uint256[][](1);
+        ids[0] = new uint256[](1);
+        ids[0] = depositIds;
+
+        //REALLOCATE ALL LIQUIDITY WITH STRATEGY
         uint256 binsAmount = 3;
         int256[] memory deltaIds = new int256[](binsAmount);
         deltaIds[0] = -1;
@@ -62,10 +100,11 @@ contract TestLiquidityManager is Test {
         distributionY[0] = (2 * PRECISION) / 3;
         distributionY[1] = PRECISION / 3;
         distributionY[2] = 0;
+
         vm.prank(EXECUTOR);
-        LiquidityManager.RemoveAndAddLiquidityParams memory params = LiquidityManager.RemoveAndAddLiquidityParams({
-            fromBinStep: uint16(binSteps[0]),
-            ids: depositIds,
+        ILiquidityManager.RemoveAndAddLiquidityParams memory params = ILiquidityManager.RemoveAndAddLiquidityParams({
+            fromBinSteps: fromBinSteps,
+            ids: ids,
             toBinStep: uint16(binSteps[3]),
             activeIdDesired: 0,
             idSlippage: 0,
@@ -92,7 +131,7 @@ contract TestLiquidityManager is Test {
         vm.prank(caller);
         vm.expectRevert();
 
-        manager.withdraw(1, new uint256[](1), block.timestamp);
+        manager.withdraw(new uint16[](1), new uint256[][](1), block.timestamp);
     }
 
     function test_onlyAdminCanUpgrade() public {

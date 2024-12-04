@@ -88,8 +88,9 @@ contract LiquidityManager is UUPSUpgradeable, AccessControl, ILiquidityManager {
     function withdraw(uint16[] memory binSteps, uint256[][] calldata ids, uint256 deadline)
         external
         onlyRole(DEFAULT_ADMIN_ROLE)
+        returns (uint256 totalXRemoved, uint256 totalYRemoved)
     {
-        (uint256 totalXRemoved, uint256 totalYRemoved) = _removeAllLiquidity(binSteps, ids, block.timestamp);
+        (totalXRemoved, totalYRemoved) = _removeAllLiquidity(binSteps, ids, deadline);
 
         tokenX.transfer(admin, totalXRemoved);
         tokenY.transfer(admin, totalYRemoved);
@@ -107,14 +108,14 @@ contract LiquidityManager is UUPSUpgradeable, AccessControl, ILiquidityManager {
         onlyRole(DEFAULT_ADMIN_ROLE)
     {
         (uint256 amountXRemoved, uint256 amountYRemoved) =
-            _removeLiquidity(fromBinStep, ids, block.timestamp + deadline);
+            _removeLiquidity(RemoveLiquidityParams(fromBinStep, ids, deadline));
 
         tokenX.transfer(admin, amountXRemoved);
         tokenY.transfer(admin, amountYRemoved);
     }
 
     function depositAllLiquidity(
-        uint256 bitStep,
+        uint256 binStep,
         uint256 activeIdDesired,
         uint256 idSlippage,
         int256[] memory deltaIds,
@@ -131,7 +132,7 @@ contract LiquidityManager is UUPSUpgradeable, AccessControl, ILiquidityManager {
         ILBRouter.LiquidityParameters memory liqParams = ILBRouter.LiquidityParameters({
             tokenX: tokenX,
             tokenY: tokenY,
-            binStep: bitStep,
+            binStep: binStep,
             amountX: amountX,
             amountY: amountY,
             amountXMin: _slippage(amountX, 1), // Allow 1% slippage
@@ -143,7 +144,7 @@ contract LiquidityManager is UUPSUpgradeable, AccessControl, ILiquidityManager {
             distributionY: distributionY,
             to: address(this),
             refundTo: address(this),
-            deadline: block.timestamp + deadline
+            deadline: deadline
         });
 
         router.addLiquidity(liqParams);
@@ -173,7 +174,7 @@ contract LiquidityManager is UUPSUpgradeable, AccessControl, ILiquidityManager {
             distributionY: params.distributionY,
             to: address(this),
             refundTo: address(this),
-            deadline: block.timestamp + params.deadline
+            deadline: params.deadline
         });
 
         tokenX.approve(address(router), amountXRemoved);
@@ -198,35 +199,33 @@ contract LiquidityManager is UUPSUpgradeable, AccessControl, ILiquidityManager {
         totalYRemoved;
         for (uint256 i; i < binSteps.length; i++) {
             (uint256 amountXRemoved, uint256 amountYRemoved) =
-                _removeLiquidity(binSteps[i], ids[i], block.timestamp + deadline);
+                _removeLiquidity(RemoveLiquidityParams(binSteps[i], ids[i], deadline));
             totalXRemoved += amountXRemoved;
             totalYRemoved += amountYRemoved;
         }
     }
     /**
      * @notice Removes liquidity
-     * @param fromBinStep binStep to remove liquidity from
-     * @param ids positions ids in the LBPair's binStep
-     * @param deadline deadline of the transaction
+     * @param params binSteps and ids to remove liquidity from
      */
 
-    function _removeLiquidity(uint16 fromBinStep, uint256[] memory ids, uint256 deadline)
+    function _removeLiquidity(RemoveLiquidityParams memory params)
         internal
         returns (uint256 amountXRemoved, uint256 amountYRemoved)
     {
-        ILBPair pair = ILBPair(getPair(fromBinStep));
+        ILBPair pair = ILBPair(getPair(params.fromBinStep));
 
-        uint256[] memory amounts = new uint256[](ids.length);
+        uint256[] memory amounts = new uint256[](params.ids.length);
         uint256 amountXMin;
         uint256 amountYMin;
         // To figure out amountXMin and amountYMin, we calculate how much X and Y underlying we have as liquidity
-        for (uint256 i; i < ids.length; i++) {
-            uint256 LBTokenAmount = pair.balanceOf(address(this), ids[i]);
+        for (uint256 i; i < params.ids.length; i++) {
+            uint256 LBTokenAmount = pair.balanceOf(address(this), params.ids[i]);
             amounts[i] = LBTokenAmount;
-            (uint256 binReserveX, uint256 binReserveY) = pair.getBin(uint24(ids[i]));
+            (uint256 binReserveX, uint256 binReserveY) = pair.getBin(uint24(params.ids[i]));
 
-            amountXMin += LBTokenAmount * binReserveX / pair.totalSupply(ids[i]);
-            amountYMin += LBTokenAmount * binReserveY / pair.totalSupply(ids[i]);
+            amountXMin += LBTokenAmount * binReserveX / pair.totalSupply(params.ids[i]);
+            amountYMin += LBTokenAmount * binReserveY / pair.totalSupply(params.ids[i]);
         }
         amountXMin = _slippage(amountXMin, 1); // Allow 1% slippage
         amountYMin = _slippage(amountYMin, 1);
@@ -234,7 +233,15 @@ contract LiquidityManager is UUPSUpgradeable, AccessControl, ILiquidityManager {
         pair.approveForAll(address(router), true);
 
         (amountXRemoved, amountYRemoved) = router.removeLiquidity(
-            tokenX, tokenY, fromBinStep, amountXMin, amountYMin, ids, amounts, address(this), block.timestamp + deadline
+            tokenX,
+            tokenY,
+            params.fromBinStep,
+            amountXMin,
+            amountYMin,
+            params.ids,
+            amounts,
+            address(this),
+            params.deadline
         );
     }
 
