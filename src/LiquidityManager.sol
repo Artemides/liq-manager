@@ -89,14 +89,7 @@ contract LiquidityManager is UUPSUpgradeable, AccessControl, ILiquidityManager {
         external
         onlyRole(DEFAULT_ADMIN_ROLE)
     {
-        uint256 totalXRemoved;
-        uint256 totalYRemoved;
-        for (uint256 i; i < binSteps.length; i++) {
-            (uint256 amountXRemoved, uint256 amountYRemoved) =
-                _removeLiquidity(binSteps[i], ids[i], block.timestamp + deadline);
-            totalXRemoved += amountXRemoved;
-            totalYRemoved += amountYRemoved;
-        }
+        (uint256 totalXRemoved, uint256 totalYRemoved) = _removeAllLiquidity(binSteps, ids, block.timestamp);
 
         tokenX.transfer(admin, totalXRemoved);
         tokenY.transfer(admin, totalYRemoved);
@@ -161,9 +154,9 @@ contract LiquidityManager is UUPSUpgradeable, AccessControl, ILiquidityManager {
      * @param params RemoveAndAddLiquidityParams for reallocations
      */
     function removeAndAddLiquidity(RemoveAndAddLiquidityParams memory params) external onlyRole(EXECUTOR_ROLE) {
-        //deallocate liquidity from ids s
+        //Remove liquidity from binSteps and ids (all)
         (uint256 amountXRemoved, uint256 amountYRemoved) =
-            _removeLiquidity(params.fromBinStep, params.ids, params.deadline);
+            _removeAllLiquidity(params.fromBinSteps, params.ids, params.deadline);
         //allocate liquidty based on bot analysis  and available
         ILBRouter.LiquidityParameters memory liqParams = ILBRouter.LiquidityParameters({
             tokenX: tokenX,
@@ -188,6 +181,27 @@ contract LiquidityManager is UUPSUpgradeable, AccessControl, ILiquidityManager {
 
         (uint256 amountXAdded, uint256 amountYAdded,,,,) = router.addLiquidity(liqParams);
         emit LiquidityReallocated(amountXRemoved, amountYRemoved, amountXAdded, amountYAdded);
+    }
+
+    /**
+     * @notice removes All liquidity from ranges and ids to this contract
+     * @param binSteps the prince ranges to withdraw from
+     * @param ids the id positionsin the LBPair to withdraw from
+     * @param deadline the deadline of the Tx
+     * @dev in case of removing all the pairs and positions an uprade is required with probably tracking pairs and positions when the contract add or removes liquidity.
+     */
+    function _removeAllLiquidity(uint16[] memory binSteps, uint256[][] memory ids, uint256 deadline)
+        internal
+        returns (uint256 totalXRemoved, uint256 totalYRemoved)
+    {
+        totalXRemoved;
+        totalYRemoved;
+        for (uint256 i; i < binSteps.length; i++) {
+            (uint256 amountXRemoved, uint256 amountYRemoved) =
+                _removeLiquidity(binSteps[i], ids[i], block.timestamp + deadline);
+            totalXRemoved += amountXRemoved;
+            totalYRemoved += amountYRemoved;
+        }
     }
     /**
      * @notice Removes liquidity

@@ -18,8 +18,8 @@ interface ILiquidityManager {
      * - `deadline`:  The deadline of the transaction
      */
     struct RemoveAndAddLiquidityParams {
-        uint16 fromBinStep;
-        uint256[] ids;
+        uint16[] fromBinSteps;
+        uint256[][] ids;
         uint16 toBinStep;
         uint24 activeIdDesired;
         uint256 idSlippage;
