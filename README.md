@@ -112,5 +112,5 @@ $ forge build
 ### Test
 
 ```shell
-$ forge test --fork-url --match-contract TestLiquidityManager AVALANCHE_MAINNET_RPC
+$ forge test --fork-url $AVALANCHE_MAINNET_RPC --match-contract TestLiquidityManager
 ```
